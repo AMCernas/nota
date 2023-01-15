@@ -23,6 +23,8 @@ FROM quay.io/evl.ms/fullstaq-ruby:${RUBY_VERSION}-${VARIANT} as base
 
 LABEL fly_launch_runtime="rails"
 
+ARG NODE_VERSION=16.19.0
+ARG YARN_VERSION=1.22.19
 ARG BUNDLER_VERSION=2.4.3
 
 ARG RAILS_ENV=production
@@ -40,7 +42,11 @@ RUN mkdir /app
 WORKDIR /app
 RUN mkdir -p tmp/pids
 
-RUN gem update --system --no-document && \
+RUN curl https://get.volta.sh | bash
+ENV VOLTA_HOME /root/.volta
+ENV PATH $VOLTA_HOME/bin:/usr/local/bin:$PATH
+RUN volta install node@${NODE_VERSION} yarn@${YARN_VERSION} && \
+    gem update --system --no-document && \
     gem install -N bundler -v ${BUNDLER_VERSION}
 
 #######################################################################
@@ -69,11 +75,20 @@ RUN bundle install && rm -rf vendor/bundle/ruby/*/cache
 
 #######################################################################
 
+# install node modules
+
+FROM build_deps as node_modules
+
+COPY package*json ./
+RUN npm install
+
+#######################################################################
+
 # install deployment packages
 
 FROM base
 
-ARG DEPLOY_PACKAGES="postgresql-client file vim curl gzip libsqlite3-0 nodejs"
+ARG DEPLOY_PACKAGES="postgresql-client file vim curl gzip libsqlite3-0"
 ENV DEPLOY_PACKAGES=${DEPLOY_PACKAGES}
 
 RUN --mount=type=cache,id=prod-apt-cache,sharing=locked,target=/var/cache/apt \
@@ -87,6 +102,9 @@ RUN --mount=type=cache,id=prod-apt-cache,sharing=locked,target=/var/cache/apt \
 COPY --from=gems /app /app
 COPY --from=gems /usr/lib/fullstaq-ruby/versions /usr/lib/fullstaq-ruby/versions
 COPY --from=gems /usr/local/bundle /usr/local/bundle
+
+# copy installed node modules
+COPY --from=node_modules /app/node_modules /app/node_modules
 
 #######################################################################
 
